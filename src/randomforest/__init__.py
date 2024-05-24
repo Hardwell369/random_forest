@@ -3,8 +3,8 @@
 randomforest
 """
 
-from bigmodule import I
 import structlog
+from bigmodule import I
 
 # 需要安装的第三方依赖包
 # from bigmodule import R
@@ -16,7 +16,7 @@ author = "BigQuant"
 # 模块分类
 category = "机器学习"
 # 模块显示名
-friendly_name = "randomforest"
+friendly_name = "RandomForest"
 # 文档地址, optional
 doc_url = "https://bigquant.com/wiki/"
 # 是否自动缓存结果
@@ -33,14 +33,14 @@ def _train(x, y, n_estimators=20, criterion='gini', max_depth=None, min_samples_
     :params max_features: 每次分支时只考虑在max_features * feature_nums数量上进行搜索
     :params render_chart: 是否绘制柱状图
     """
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.ensemble import RandomForestClassifier
-    import pandas as pd
-    import numpy as np
-    import subprocess
-    import joblib
-    import dai
     import os
+    import subprocess
+
+    import dai
+    import joblib
+    import numpy as np
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
     # 初始化日志
     logger = structlog.get_logger()
@@ -79,7 +79,6 @@ def _train_cache(input_1, input_2, input_3):
     x = x_ds.read()
     y = x['label']
     x = x.drop(['label'], axis=1)
-    # y = y_ds.read()
     n_estimators, criterion, max_depth, min_samples_split, min_samples_leaf, max_features, random, render_chart = input_2
     model = _train(x, y, n_estimators, criterion.split('(')[0], max_depth, min_samples_split, min_samples_leaf, max_features, random, render_chart)
     return dict(model=dai.DataSource.write_pickle(model))
@@ -94,9 +93,9 @@ def _predict_cache(input_1, input_2, input_3):
     return dict(pred=dai.DataSource.write_pickle({'pred': pred}))
 
 def run(
-    input_2: I.port("回测集"), 
-    input_1: I.port("训练集(标签名称必须是label)", optional=True)=None, 
-    input_3: I.port('加载模型', optional=True)=None,
+    input_1: I.port("训练数据: 标签名称必须是label", optional=True) = None, 
+    input_2: I.port("预测数据", optional=True) = None, 
+    input_3: I.port('加载模型', optional=True) = None,
 
     n_estimators: I.int("树的数量") = 10, 
     criterion: I.choice("评估函数", values=['squared_error(回归)', 'absolute_error(回归)', 'friedman_mse(回归)', 'poisson(回归)', 'gini(分类)', 'entropy(分类)', 'log_loss(分类)'])='squared_error(回归)', 
@@ -125,21 +124,10 @@ def run(
         x['label'] = label
 
         x_ds = dai.DataSource.write_bdb(x)
-        # y_ds = dai.DataSource.write_bdb(y)
         model_dict = M.python.v1(run=_train_cache, 
                                 input_1=(x_ds), 
                                 input_2=(n_estimators, criterion, max_depth, min_samples_split, min_samples_leaf, max_features, random, render_chart)).model.read()
-        # model_dict = _train(feature_df, 
-        #                     label, 
-        #                     n_estimators=n_estimators, 
-        #                     criterion=criterion.split('(')[0], 
-        #                     max_depth=max_depth, 
-        #                     min_samples_split=min_samples_split, 
-        #                     min_samples_leaf=min_samples_leaf, 
-        #                     max_features=max_features, 
-        #                     random=random, 
-        #                     render_chart=render_chart)
-    
+
     # 预测
     test_df = input_2.read()
     feature = test_df.drop(['date', 'instrument'], axis=1)
@@ -151,25 +139,23 @@ def run(
                                 input_2=(model)).pred.read()['pred']
     test_df['pre_label'] = ypre
 
-    # 图表显示变量
-    show_plot = {'plot_render': render_chart}
-
     # 还需要打包模型
     model = {'model': model_dict['model']}
     return I.Outputs(prediction=dai.DataSource.write_bdb(test_df[['date', 'instrument', 'pre_label']]), 
                     model=dai.DataSource.write_pickle(model), 
                     columns_name = dai.DataSource.write_pickle({'columns': columns}), 
-                    plot_chart=dai.DataSource.write_pickle(show_plot))
+                    plot_chart=render_chart)
+
 
 def post_run(outputs):
     """
     后置运行函数
     """
-    import pandas as pd
     import bigcharts
+    import pandas as pd
 
     # 特征重要性可视化配置
-    if outputs.plot_chart.read()['plot_render']: 
+    if outputs.plot_chart: 
         # 加载模型
         model = outputs.model.read()['model']
 
